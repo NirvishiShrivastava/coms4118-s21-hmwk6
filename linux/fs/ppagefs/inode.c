@@ -18,3 +18,10 @@ static struct file_system_type ppage_fs_type = {
 	.kill = 	kill_litter_super,
 };
 
+static int __init ppagefs_init(void)
+{
+	return register_filesystem(&ppage_fs_type);
+}
+
+/* To initialize PpageFS at kernel boot time */
+module_init(ppagefs_init);
