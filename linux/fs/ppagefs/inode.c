@@ -11,11 +11,13 @@
 #include<linux/slab.h>
 #include<linux/magic.h>
 
+/* TODO: create ppage_mount and ppage_fill_super functions */
+
 static struct file_system_type ppage_fs_type = {
 	.owner = 	THIS_MODULE,
 	.name = 	"ppagefs",
 	.mount = 	ppage_mount,
-	.kill = 	kill_litter_super,
+	.kill_sb = 	kill_litter_super,
 };
 
 static int __init ppagefs_init(void)
