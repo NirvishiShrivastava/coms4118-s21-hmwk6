@@ -79,7 +79,7 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
         struct task_struct *p;
         long pid;
         char s_pid[6];
-	char subdir_name[50];
+	char subdir_name[50] = "";
 
 	p = &init_task;
         read_lock(&tasklist_lock);
@@ -90,10 +90,11 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 	get_task_comm(task_name, p);
 	pr_info("Before parsing name is %s\n", task_name);
 	parse(task_name);
-	pr_info("after pasing name is %s\n", task_name);
-	strcat(subdir_name,s_pid);
+	pr_info("after parsing name is %s\n", task_name);
+
+	strcat(subdir_name, s_pid);
 	strcat(subdir_name, ".");
-	strcat(subdir_name,task_name);
+	strcat(subdir_name, task_name);
         
 	ppage_create_dir(sb, dir, subdir_name);
 
