@@ -11,6 +11,9 @@
 #include<linux/slab.h>
 #include<linux/magic.h>
 #include<linux/pagemap.h>
+#include<linux/sched.h>
+#include<linux/string.h>
+#include<linux/sched/task.h>
 
 static struct inode *ppage_make_inode(struct super_block *sb,
 			       int mode)
@@ -60,15 +63,56 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 
 };
 
+void parse(char *name)
+{
+	while(*name != '\0')
+	{
+		if(*name == '/')
+			*name = '-';
+		name++;
+	}
+}
+
+static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
+{
+        char task_name[16];
+        struct task_struct *p;
+        long pid;
+        char s_pid[6];
+	char subdir_name[50];
+
+	p = &init_task;
+        read_lock(&tasklist_lock);
+        pid = (long)task_pid_vnr(p);
+	read_unlock(&tasklist_lock);
+	sprintf(s_pid,"%ld",pid);
+
+	get_task_comm(task_name, p);
+	pr_info("Before parsing name is %s\n", task_name);
+	parse(task_name);
+	pr_info("after pasing name is %s\n", task_name);
+	strcat(subdir_name,s_pid);
+	strcat(subdir_name, ".");
+	strcat(subdir_name,task_name);
+        
+	ppage_create_dir(sb, dir, subdir_name);
+
+        return 0;
+
+}
+
 static int ppage_fill_super(struct super_block *sb, void *data, int silent)
 {
 	static const struct tree_descr ppage_files[] = {{""}};
 	int err;
-	char dir_name[] = "ppagefs";
+	struct dentry *root_dentry;
+	char root_dir_name[] = "ppagefs";
+
 	err = simple_fill_super(sb, PPAGEFS_MAGIC, ppage_files);
 	if(err)
 		goto fail;
-	ppage_create_dir(sb, sb->s_root, dir_name);
+	root_dentry = ppage_create_dir(sb, sb->s_root, root_dir_name);
+	ppage_create_subdir(sb, root_dentry);
 fail:
 	return err;
 }
