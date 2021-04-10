@@ -15,6 +15,7 @@
 #include<linux/string.h>
 #include<linux/sched/task.h>
 #include<linux/sched/signal.h>
+#include <linux/sched/mm.h>
 
 static int check_pte_for_addr(struct mm_struct *mm, unsigned long addr)
 {
@@ -101,11 +102,36 @@ void parse(char *name)
 	}
 }
 
+static long calculate_total(struct task_struct *task)
+{
+	struct mm_struct *task_mm;
+	struct vm_area_struct *vma;
+	unsigned long begin, end, curr;
+	long total;
+
+	task_mm = get_task_mm(task);
+	if (!task_mm) {
+		pr_info("Couldn't get mm for this process");
+		//return -EINVAL;
+		return 0;
+	}
+
+	total = 0;
+	for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
+	    begin = vma->vm_start;
+	    end = vma->vm_end;
+	    for (curr = begin; curr < end; curr += PAGE_SIZE)
+		    total += check_pte_for_addr(task_mm, curr);
+	}
+	return total;
+}
+
 static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 {
         char task_name[16];
         struct task_struct *p;
         long pid;
+        long total_pages, zero_pages;
         char s_pid[6];
 	char subdir_name[30] = "";
 
@@ -126,6 +152,10 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 		strcat(subdir_name, task_name);
 
 		ppage_create_dir(sb, dir, subdir_name);
+
+		/* Get total physical pages of process p */
+		total_pages = calculate_total(p);
+		pr_info("# of Total Pages: %ld", total_pages);
 	}
 	read_unlock(&tasklist_lock);
         return 0;
