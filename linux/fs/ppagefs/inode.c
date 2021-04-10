@@ -16,6 +16,33 @@
 #include<linux/sched/task.h>
 #include<linux/sched/signal.h>
 
+static int check_pte_for_addr(struct mm_struct *mm, unsigned long addr)
+{
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	pgd = pgd_offset(mm, addr);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+		goto out;
+	p4d = p4d_offset(pgd, addr);
+	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
+		goto out;
+	pud = pud_offset(p4d, addr);
+	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+		goto out;
+	pmd = pmd_offset(pud, addr);
+	if (!(pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))) {
+		pte = pte_offset_map(pmd, addr);
+		if (!pte_none(*pte))
+			return 1;
+	}
+out:
+	return 0;
+}
+
 static struct inode *ppage_make_inode(struct super_block *sb,
 			       int mode)
 {
