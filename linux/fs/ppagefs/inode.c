@@ -1,7 +1,7 @@
 /*
  * linux/fs/ppagefs/inode.c
  * This is a psuedo file system that exports kernel information
- * about the process physical page usage of currently 
+ * about the process physical page usage of currently
  * running process.
  */
 
@@ -15,7 +15,11 @@
 #include<linux/string.h>
 #include<linux/sched/task.h>
 #include<linux/sched/signal.h>
-#include <linux/sched/mm.h>
+#include<linux/sched/mm.h>
+#include<linux/fs_context.h>
+#include<linux/fs_parser.h>
+
+#define PPAGEFS_DEFAULT_MODE    0755
 
 static int check_pte_for_addr(struct mm_struct *mm, unsigned long addr)
 {
@@ -24,7 +28,7 @@ static int check_pte_for_addr(struct mm_struct *mm, unsigned long addr)
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
-
+	
 	pgd = pgd_offset(mm, addr);
 	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
 		goto out;
@@ -45,12 +49,12 @@ out:
 }
 
 static struct inode *ppage_make_inode(struct super_block *sb,
-			       int mode)
+                   int mode)
 {
 	struct inode *inode;
-
+	
 	inode = new_inode(sb);
-
+	
 	if (!inode)
 		return NULL;
 
@@ -64,7 +68,7 @@ static struct inode *ppage_make_inode(struct super_block *sb,
 };
 
 struct dentry *ppage_create_dir(struct super_block *sb,
-				struct dentry *dir, const char *name)
+                struct dentry *dir, const char *name)
 {
 	struct dentry *dentry;
 	struct inode *inode;
@@ -94,8 +98,7 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 
 void parse(char *name)
 {
-	while(*name != '\0')
-	{
+	while(*name != '\0') {
 		if(*name == '/')
 			*name = '-';
 		name++;
@@ -112,33 +115,31 @@ static long calculate_total(struct task_struct *task)
 	task_mm = get_task_mm(task);
 	if (!task_mm) {
 		pr_info("Couldn't get mm for this process");
-		//return -EINVAL;
-		return 0;
+                return 0;
 	}
 
 	total = 0;
 	for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
-	    begin = vma->vm_start;
-	    end = vma->vm_end;
-	    for (curr = begin; curr < end; curr += PAGE_SIZE)
-		    total += check_pte_for_addr(task_mm, curr);
+		begin = vma->vm_start;
+		end = vma->vm_end;
+		for (curr = begin; curr < end; curr += PAGE_SIZE)
+			total += check_pte_for_addr(task_mm, curr);
 	}
 	return total;
 }
 
 static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 {
-        char task_name[16];
-        struct task_struct *p;
-        long pid;
-        long total_pages, zero_pages;
-        char s_pid[6];
+	char task_name[16];
+	struct task_struct *p;
+	long pid;
+	long total_pages, zero_pages;
+	char s_pid[6];
 	char subdir_name[30] = "";
 
-        read_lock(&tasklist_lock);
+	read_lock(&tasklist_lock);
 
 	for_each_process(p) {
-
 		strcpy(subdir_name, "");
 		pid = (long)task_pid_vnr(p);
 		sprintf(s_pid,"%ld",pid);
@@ -159,16 +160,64 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 	}
 	read_unlock(&tasklist_lock);
         return 0;
-
 }
 
-static int ppage_fill_super(struct super_block *sb, void *data, int silent)
+struct ppagefs_mount_opts {
+	umode_t mode;
+};
+
+struct ppagefs_fs_info {
+	struct ppagefs_mount_opts mount_opts;
+};
+
+static void ppagefs_free_fc(struct fs_context *fc)
+{
+	kfree(fc->s_fs_info);
+}
+
+enum ppagefs_param {
+	Opt_mode,
+};
+
+static const struct fs_parameter_spec ppagefs_param_specs[] = {
+	fsparam_u32oct("mode",    Opt_mode),
+	{}
+};
+
+const struct fs_parameter_description ppagefs_fs_parameters = {
+	.name =		"ppagefs",
+	.specs =	ppagefs_param_specs,
+};
+
+static int ppagefs_parse_param(struct fs_context *fc, struct fs_parameter *param)
+{
+	struct fs_parse_result result;
+	struct ppagefs_fs_info *fsi = fc->s_fs_info;
+	int opt;
+
+	opt = fs_parse(fc, &ppagefs_fs_parameters, param, &result);
+
+	if (opt < 0) {
+		if (opt == -ENOPARAM)
+			opt = 0;
+		return opt;
+	}
+
+	switch (opt) {
+		case Opt_mode:
+			fsi->mount_opts.mode = result.uint_32 & S_IALLUGO;
+			break;
+	}
+	return 0;
+}
+
+static int ppagefs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	static const struct tree_descr ppage_files[] = {{""}};
 	int err;
 	struct dentry *root_dentry;
 	char root_dir_name[] = "ppagefs";
-
+	
 	err = simple_fill_super(sb, PPAGEFS_MAGIC, ppage_files);
 	if(err)
 		goto fail;
@@ -178,18 +227,45 @@ fail:
 	return err;
 }
 
-static struct dentry *ppage_mount(struct file_system_type *fs_type,
-			int flags, const char *dev_name, 
-			void *data)
+static int ppagefs_get_tree(struct fs_context *fc)
 {
-	return mount_single(fs_type, flags, data, ppage_fill_super);
+	return get_tree_nodev(fc, ppagefs_fill_super);
+}
+
+static const struct fs_context_operations ppagefs_context_ops = {
+	.free        = ppagefs_free_fc,
+	.parse_param    = ppagefs_parse_param,
+	.get_tree    = ppagefs_get_tree,
+};
+
+int ppagefs_init_fs_context(struct fs_context *fc)
+{
+	struct ppagefs_fs_info *fsi;
+
+	fsi = kzalloc(sizeof(*fsi), GFP_KERNEL);
+
+	if (!fsi)
+		return -ENOMEM;
+
+	fsi->mount_opts.mode = PPAGEFS_DEFAULT_MODE;
+	fc->s_fs_info = fsi;
+	fc->ops = &ppagefs_context_ops;
+	return 0;
+}
+
+static void ppagefs_kill_sb(struct super_block *sb)
+{
+	kfree(sb->s_fs_info);
+	kill_litter_super(sb);
 }
 
 static struct file_system_type ppage_fs_type = {
-	.owner = 	THIS_MODULE,
-	.name = 	"ppagefs",
-	.mount = 	ppage_mount,
-	.kill_sb = 	kill_litter_super,
+	.owner =		THIS_MODULE,
+	.name =			"ppagefs",
+	.init_fs_context =	ppagefs_init_fs_context,
+	.parameters =		&ppagefs_fs_parameters,
+	.kill_sb =		ppagefs_kill_sb,
+	.fs_flags =		FS_USERNS_MOUNT,
 };
 
 static int __init ppagefs_init(void)
@@ -199,3 +275,5 @@ static int __init ppagefs_init(void)
 
 /* To initialize PpageFS at kernel boot time */
 module_init(ppagefs_init);
+
+
