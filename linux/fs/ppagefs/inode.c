@@ -22,6 +22,7 @@
 #include<linux/fsnotify.h>
 
 #define PPAGEFS_DEFAULT_MODE    0755
+#define PPAGEFS_DEFAULT_DIR_MODE 0555
 #define PPAGEFS_FSDATA_IS_REAL_FOPS_BIT BIT(0)
 
 static struct vfsmount *ppagefs_mount;
@@ -94,7 +95,7 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 	if (!dentry)
 		return NULL;
 
-	inode = ppage_make_inode(sb, S_IFDIR | 0755);
+	inode = ppage_make_inode(sb, S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
 	if (!inode) {
 		dput(dentry);
 		return NULL;
