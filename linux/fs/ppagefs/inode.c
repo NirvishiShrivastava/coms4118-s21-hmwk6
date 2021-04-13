@@ -22,7 +22,7 @@
 #include<linux/fsnotify.h>
 
 #define PPAGEFS_DEFAULT_MODE    0755
-#define PPAGEFS_DEFAULT_DIR_MODE 0755
+#define PPAGEFS_DEFAULT_DIR_MODE 0555
 #define PPAGEFS_DEFAULT_FILE_MODE 0444
 #define PPAGEFS_FSDATA_IS_REAL_FOPS_BIT BIT(0)
 
@@ -81,15 +81,56 @@ static struct inode *ppage_make_inode(struct super_block *sb,
 	return inode;
 };
 
+static long extract_pid(char dir_path[])
+{
+	int ret, i = 0;
+	char pid_str[6] = "";
+	long pid;
+
+	while (dir_path[i] != ".") {
+		pid_str[i] = dir_path[i];
+		i++;
+	}
+	
+	ret = kstrtol(pid_str, 10, &pid);
+	if (ret)
+		return -EINVAL;
+	pr_info("Extracted PID: %ld", pid);
+	return pid;
+}
+
 static ssize_t default_read_file(struct file *file, char __user *buf,
                  size_t count, loff_t *ppos)
 {
 	char test[] = "hello world";
 	int len = strlen(test);
-	int ret;
-	//file->private_data = test;
+	int ret, i;
+	long pid;
+	struct dentry *dentry;
+	char filename[6] = "";
+	char parent_dir[30] = "";
+	char pid_str[6] = "";
+
+	dentry = file_dentry(file);
+	strcpy(filename, dentry->d_name.name);
+	strcpy(parent_dir, dentry->d_parent->d_name.name);
+
+	//pid = extract_pid(parent_dir);
+	i = 0;
+	while(parent_dir[i] != '.') {
+		pid_str[i] = parent_dir[i];
+		i++;
+	}
+
+	ret = kstrtol(pid_str, 10, &pid);
+        if (ret)
+                return -EINVAL;
+        pr_info("Extracted PID: %ld", pid);
+
+	if (*ppos > 0)
+		return 0;
+
 	ret = copy_to_user(buf,test,len);
-	pr_info("*********************RET value from CTU %d and len = %d", ret, len);
 	*ppos += len;
 	if(ret)
 		return -EFAULT;
