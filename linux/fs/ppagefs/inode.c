@@ -108,7 +108,6 @@ struct dentry *ppage_create_file(struct super_block *sb,
 	qname.name = name;
 	qname.len = strlen(name);
 	qname.hash = full_name_hash(dir, name, qname.len);
-
 	dentry = d_alloc(dir, &qname);
 	if (!dentry)
 		return NULL;
@@ -118,7 +117,7 @@ struct dentry *ppage_create_file(struct super_block *sb,
 		dput(dentry);
 		return NULL;
 	}
-
+	
 	inode->i_op = &ppagefs_file_inode_operations;
 	inode->i_fop = &ppagefs_file_operations;
 
@@ -126,6 +125,109 @@ struct dentry *ppage_create_file(struct super_block *sb,
 	return dentry;
 
 };
+
+
+static void __ppagefs_file_removed(struct dentry *dentry)
+{
+	struct ppagefs_fsdata *fsd;
+
+	/*
+	 * Paired with the closing smp_mb() implied by a successful
+	 * cmpxchg() in debugfs_file_get(): either
+	 * debugfs_file_get() must see a dead dentry or we must see a
+	 * debugfs_fsdata instance at ->d_fsdata here (or both).
+	 */
+	smp_mb();
+	fsd = READ_ONCE(dentry->d_fsdata);
+	if ((unsigned long)fsd & PPAGEFS_FSDATA_IS_REAL_FOPS_BIT)
+		return;
+	if (!refcount_dec_and_test(&fsd->active_users))
+		wait_for_completion(&fsd->active_users_drained);
+}
+
+static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
+{
+	int ret = 0;
+
+	if (simple_positive(dentry)) {
+		dget(dentry);
+		if (d_is_dir(dentry)) {
+			ret = simple_rmdir(d_inode(parent), dentry);
+			if (!ret)
+				fsnotify_rmdir(d_inode(parent), dentry);
+		} else {
+			simple_unlink(d_inode(parent), dentry);
+			fsnotify_unlink(d_inode(parent), dentry);
+		}
+		if (!ret)
+			d_delete(dentry);
+		if (d_is_reg(dentry))
+			__ppagefs_file_removed(dentry);
+		dput(dentry);
+	}
+	return ret;
+}
+
+void ppagefs_remove_recursive(struct dentry *dentry)
+{
+	pr_info("Inside %s", __func__);
+	struct dentry *child, *parent;
+
+	if (IS_ERR_OR_NULL(dentry))
+		return;
+
+	parent = dentry;
+ down:
+	inode_lock(d_inode(parent));
+ loop:
+	/*
+	 * The parent->d_subdirs is protected by the d_lock. Outside that
+	 * lock, the child can be unlinked and set to be freed which can
+	 * use the d_u.d_child as the rcu head and corrupt this list.
+	 */
+	spin_lock(&parent->d_lock);
+	list_for_each_entry(child, &parent->d_subdirs, d_child) {
+		if (!simple_positive(child))
+			continue;
+
+		/* perhaps simple_empty(child) makes more sense */
+		if (!list_empty(&child->d_subdirs)) {
+			spin_unlock(&parent->d_lock);
+			inode_unlock(d_inode(parent));
+			parent = child;
+			goto down;
+		}
+
+		spin_unlock(&parent->d_lock);
+
+		if (!__ppagefs_remove(child, parent))
+			simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
+
+		/*
+		 * The parent->d_lock protects agaist child from unlinking
+		 * from d_subdirs. When releasing the parent->d_lock we can
+		 * no longer trust that the next pointer is valid.
+		 * Restart the loop. We'll skip this one with the
+		 * simple_positive() check.
+		 */
+		goto loop;
+	}
+	spin_unlock(&parent->d_lock);
+
+	inode_unlock(d_inode(parent));
+	child = parent;
+	parent = parent->d_parent;
+	inode_lock(d_inode(parent));
+
+	if (child != dentry)
+		/* go up */
+		goto loop;
+
+	if (!__ppagefs_remove(child, parent))
+		simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
+	inode_unlock(d_inode(parent));
+}
+
 
 static int ppagefs_subdir_open(struct inode *inode, struct file *file)
 {
@@ -137,7 +239,7 @@ static int ppagefs_subdir_open(struct inode *inode, struct file *file)
 
 	dentry = file_dentry(file);
 
-	// ppagefs_remove_recursive(dentry);
+	ppagefs_remove_recursive(dentry);
 
 	if (ppage_create_file(sb, dentry, total_file_name) < 0)
 		return -ENOMEM;
@@ -145,8 +247,7 @@ static int ppagefs_subdir_open(struct inode *inode, struct file *file)
 	if (ppage_create_file(sb, dentry, zero_file_name) < 0)
 		return -ENOMEM;
 
-	// return dcache_dir_open(inode, file);
-	return 0;
+	return dcache_dir_open(inode, file);
 }
 
 const struct file_operations ppagefs_subdir_operations = {
@@ -302,108 +403,6 @@ static int ppagefs_parse_param(struct fs_context *fc, struct fs_parameter *param
 			break;
 	}
 	return 0;
-}
-
-
-static void __ppagefs_file_removed(struct dentry *dentry)
-{
-	struct ppagefs_fsdata *fsd;
-
-	/*
-	 * Paired with the closing smp_mb() implied by a successful
-	 * cmpxchg() in debugfs_file_get(): either
-	 * debugfs_file_get() must see a dead dentry or we must see a
-	 * debugfs_fsdata instance at ->d_fsdata here (or both).
-	 */
-	smp_mb();
-	fsd = READ_ONCE(dentry->d_fsdata);
-	if ((unsigned long)fsd & PPAGEFS_FSDATA_IS_REAL_FOPS_BIT)
-		return;
-	if (!refcount_dec_and_test(&fsd->active_users))
-		wait_for_completion(&fsd->active_users_drained);
-}
-
-static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
-{
-	int ret = 0;
-
-	if (simple_positive(dentry)) {
-		dget(dentry);
-		if (d_is_dir(dentry)) {
-			ret = simple_rmdir(d_inode(parent), dentry);
-			if (!ret)
-				fsnotify_rmdir(d_inode(parent), dentry);
-		} else {
-			simple_unlink(d_inode(parent), dentry);
-			fsnotify_unlink(d_inode(parent), dentry);
-		}
-		if (!ret)
-			d_delete(dentry);
-		if (d_is_reg(dentry))
-			__ppagefs_file_removed(dentry);
-		dput(dentry);
-	}
-	return ret;
-}
-
-void ppagefs_remove_recursive(struct dentry *dentry)
-{
-	pr_info("Inside %s", __func__);
-	struct dentry *child, *parent;
-
-	if (IS_ERR_OR_NULL(dentry))
-		return;
-
-	parent = dentry;
- down:
-	inode_lock(d_inode(parent));
- loop:
-	/*
-	 * The parent->d_subdirs is protected by the d_lock. Outside that
-	 * lock, the child can be unlinked and set to be freed which can
-	 * use the d_u.d_child as the rcu head and corrupt this list.
-	 */
-	spin_lock(&parent->d_lock);
-	list_for_each_entry(child, &parent->d_subdirs, d_child) {
-		if (!simple_positive(child))
-			continue;
-
-		/* perhaps simple_empty(child) makes more sense */
-		if (!list_empty(&child->d_subdirs)) {
-			spin_unlock(&parent->d_lock);
-			inode_unlock(d_inode(parent));
-			parent = child;
-			goto down;
-		}
-
-		spin_unlock(&parent->d_lock);
-
-		if (!__ppagefs_remove(child, parent))
-			simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
-
-		/*
-		 * The parent->d_lock protects agaist child from unlinking
-		 * from d_subdirs. When releasing the parent->d_lock we can
-		 * no longer trust that the next pointer is valid.
-		 * Restart the loop. We'll skip this one with the
-		 * simple_positive() check.
-		 */
-		goto loop;
-	}
-	spin_unlock(&parent->d_lock);
-
-	inode_unlock(d_inode(parent));
-	child = parent;
-	parent = parent->d_parent;
-	inode_lock(d_inode(parent));
-
-	if (child != dentry)
-		/* go up */
-		goto loop;
-
-	if (!__ppagefs_remove(child, parent))
-		simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
-	inode_unlock(d_inode(parent));
 }
 
 
