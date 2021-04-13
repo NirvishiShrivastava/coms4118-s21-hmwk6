@@ -22,7 +22,8 @@
 #include<linux/fsnotify.h>
 
 #define PPAGEFS_DEFAULT_MODE    0755
-#define PPAGEFS_DEFAULT_DIR_MODE 0555
+#define PPAGEFS_DEFAULT_DIR_MODE 0755
+#define PPAGEFS_DEFAULT_FILE_MODE 0444
 #define PPAGEFS_FSDATA_IS_REAL_FOPS_BIT BIT(0)
 
 static struct vfsmount *ppagefs_mount;
@@ -80,9 +81,87 @@ static struct inode *ppage_make_inode(struct super_block *sb,
 	return inode;
 };
 
+const struct inode_operations ppagefs_file_inode_operations = {
+	.setattr	= simple_setattr,
+	.getattr	= simple_getattr,
+};
+
+const struct file_operations ppagefs_file_operations = {
+	.read_iter	= generic_file_read_iter,
+	.write_iter	= generic_file_write_iter,
+	// .mmap		= generic_file_mmap,
+	.fsync		= noop_fsync,
+	.splice_read	= generic_file_splice_read,
+	.splice_write	= iter_file_splice_write,
+	.llseek		= generic_file_llseek,
+	// .get_unmapped_area	= ramfs_mmu_get_unmapped_area,
+};
+
+struct dentry *ppage_create_file(struct super_block *sb,
+                struct dentry *dir, const char *name)
+{
+	pr_info("Inside %s", __func__);
+	struct dentry *dentry;
+	struct inode *inode;
+	struct qstr qname;
+
+	qname.name = name;
+	qname.len = strlen(name);
+	qname.hash = full_name_hash(dir, name, qname.len);
+
+	dentry = d_alloc(dir, &qname);
+	if (!dentry)
+		return NULL;
+
+	inode = ppage_make_inode(sb, S_IFREG | PPAGEFS_DEFAULT_FILE_MODE);
+	if (!inode) {
+		dput(dentry);
+		return NULL;
+	}
+
+	inode->i_op = &ppagefs_file_inode_operations;
+	inode->i_fop = &ppagefs_file_operations;
+
+	d_add(dentry, inode);
+	return dentry;
+
+};
+
+static int ppagefs_subdir_open(struct inode *inode, struct file *file)
+{
+	pr_info("Inside %s", __func__);
+	struct super_block *sb = inode->i_sb;
+	struct dentry *dentry, *child;
+	char total_file_name[] = "total";
+	char zero_file_name[] = "zero";
+
+	dentry = file_dentry(file);
+
+	// ppagefs_remove_recursive(dentry);
+
+	if (ppage_create_file(sb, dentry, total_file_name) < 0)
+		return -ENOMEM;
+
+	if (ppage_create_file(sb, dentry, zero_file_name) < 0)
+		return -ENOMEM;
+
+	// return dcache_dir_open(inode, file);
+	return 0;
+}
+
+const struct file_operations ppagefs_subdir_operations = {
+	.open =		ppagefs_subdir_open,
+	.release =	dcache_dir_close,
+	.llseek =	dcache_dir_lseek,
+	.read =		generic_read_dir,
+	.iterate =	dcache_readdir,
+	.fsync =	noop_fsync,
+};
+
 struct dentry *ppage_create_dir(struct super_block *sb,
                 struct dentry *dir, const char *name)
 {
+	pr_info("Inside %s", __func__);
 	struct dentry *dentry;
 	struct inode *inode;
 	struct qstr qname;
@@ -102,7 +181,7 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 	}
 
 	inode->i_op = &simple_dir_inode_operations;
-	inode->i_fop = &simple_dir_operations;
+	inode->i_fop = &ppagefs_subdir_operations;
 
 	d_add(dentry, inode);
 	return dentry;
@@ -143,6 +222,7 @@ static long calculate_total(struct task_struct *task)
 
 static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 {
+	pr_info("Inside %s", __func__);
 	char task_name[16];
 	struct task_struct *p;
 	long pid;
@@ -168,8 +248,8 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 		ppage_create_dir(sb, dir, subdir_name);
 
 		/* Get total physical pages of process p */
-		total_pages = calculate_total(p);
-		pr_info("# of Total Pages: %ld", total_pages);
+		//total_pages = calculate_total(p);
+		//pr_info("# of Total Pages: %ld", total_pages);
 	}
 	read_unlock(&tasklist_lock);
         return 0;
@@ -268,6 +348,7 @@ static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 
 void ppagefs_remove_recursive(struct dentry *dentry)
 {
+	pr_info("Inside %s", __func__);
 	struct dentry *child, *parent;
 
 	if (IS_ERR_OR_NULL(dentry))
@@ -328,6 +409,7 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 
 static int ppagefs_root_dir_open(struct inode *inode, struct file *file)
 {
+	pr_info("Inside %s", __func__);
 	struct super_block *sb = inode->i_sb;
 	struct dentry *dentry, *child;
 
@@ -414,5 +496,3 @@ static int __init ppagefs_init(void)
 
 /* To initialize PpageFS at kernel boot time */
 module_init(ppagefs_init);
-
-
