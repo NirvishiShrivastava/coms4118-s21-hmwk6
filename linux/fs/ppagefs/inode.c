@@ -81,19 +81,43 @@ static struct inode *ppage_make_inode(struct super_block *sb,
 	return inode;
 };
 
+static ssize_t default_read_file(struct file *file, char __user *buf,
+                 size_t count, loff_t *ppos)
+{
+	char test[] = "hello world";
+	int len = strlen(test);
+	int ret;
+	//file->private_data = test;
+	ret = copy_to_user(buf,test,len);
+	pr_info("*********************RET value from CTU %d and len = %d", ret, len);
+	*ppos += len;
+	if(ret)
+		return -EFAULT;
+
+	return len;
+}
+
+static ssize_t default_write_file(struct file *file, const char __user *buf,
+                   size_t count, loff_t *ppos)
+{
+	return count;
+}
+
+
 const struct inode_operations ppagefs_file_inode_operations = {
 	.setattr	= simple_setattr,
 	.getattr	= simple_getattr,
 };
 
 const struct file_operations ppagefs_file_operations = {
-	.read_iter	= generic_file_read_iter,
-	.write_iter	= generic_file_write_iter,
+	.read		= default_read_file,
+	.write		= default_write_file,
+	.open		= simple_open,
 	// .mmap		= generic_file_mmap,
-	.fsync		= noop_fsync,
-	.splice_read	= generic_file_splice_read,
-	.splice_write	= iter_file_splice_write,
-	.llseek		= generic_file_llseek,
+	//.fsync		= noop_fsync,
+	//.splice_read	= generic_file_splice_read,
+	//.splice_write	= iter_file_splice_write,
+	.llseek		= noop_llseek,
 	// .get_unmapped_area	= ramfs_mmu_get_unmapped_area,
 };
 
