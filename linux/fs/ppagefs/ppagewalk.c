@@ -1,5 +1,36 @@
 #include <asm/pgtable.h>
 
+static int expose_page_range(struct mm_struct *target_mm,
+			    pmd_t *pmd,
+			    unsigned long va_curr,
+			    unsigned long va_end)
+{
+	int ret = 0;
+	pte_t *pte;
+	struct page *page;
+	unsigned long pfn;
+
+	down_read(&target_mm->mmap_sem);
+	pte = pte_offset_map(pmd, va_curr);
+	if (pte_none(*pte))
+		goto out_sem;
+	up_read(&target_mm->mmap_sem);
+
+	pfn = pte_pfn(*pte);
+	if (pfn) {
+		page = pfn_to_page(pfn);
+		if (page)
+			return 0;
+		else
+			return 1;
+	}
+out:
+	return ret;
+out_sem:
+	up_read(&target_mm->mmap_sem);
+	goto out;
+}
+
 static int expose_pte_range(struct mm_struct *target_mm,
 			    pud_t *pud,
 			    unsigned long va_curr,
@@ -17,8 +48,8 @@ static int expose_pte_range(struct mm_struct *target_mm,
 	up_read(&target_mm->mmap_sem);
 
 	do {
-		// ret = expose_page_range(target_mm, pmd, fake_pmd_base,
-		// 		       cur_pgtbl, va_curr);
+		ret = expose_page_range(target_mm, pmd,
+				       va_curr, va_end);
 		if (ret < 0)
 			goto out;
 		va_curr = ((va_curr + PAGE_SIZE) & PAGE_MASK);
