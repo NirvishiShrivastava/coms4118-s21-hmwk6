@@ -7,5 +7,5 @@ struct page_iter_list {
 extern int expose_vm_region(struct mm_struct *target_mm,
                                 unsigned long begin_vaddr,
                                 unsigned long end_vaddr, int toggle, 
-				long *count, struct page_iter_list *list);
+				long *count, struct list_head *list);
 
