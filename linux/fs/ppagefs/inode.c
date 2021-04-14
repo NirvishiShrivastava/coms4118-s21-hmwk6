@@ -20,6 +20,8 @@
 #include<linux/fs_parser.h>
 #include<linux/refcount.h>
 #include<linux/fsnotify.h>
+#include "ppagewalk.h"
+#include<linux/list.h>
 
 #define PPAGEFS_DEFAULT_MODE    0755
 #define PPAGEFS_DEFAULT_DIR_MODE 0555
@@ -81,42 +83,54 @@ static struct inode *ppage_make_inode(struct super_block *sb,
 	return inode;
 };
 
-static long extract_pid(char dir_path[])
+static long calculate_pages(struct task_struct *task, int toggle)
 {
-	int ret, i = 0;
-	char pid_str[6] = "";
-	long pid;
+        struct mm_struct *task_mm;
+        struct vm_area_struct *vma;
+        unsigned long begin, end, curr;
+        struct page_iter_list *list;
+        long count;
 
-	while (dir_path[i] != ".") {
-		pid_str[i] = dir_path[i];
-		i++;
-	}
-	
-	ret = kstrtol(pid_str, 10, &pid);
-	if (ret)
-		return -EINVAL;
-	pr_info("Extracted PID: %ld", pid);
-	return pid;
+        count = 0;
+        INIT_LIST_HEAD(&list->page_list);
+
+        task_mm = get_task_mm(task);
+        if (!task_mm) {
+                pr_info("Couldn't get mm for this process");
+                return 0;
+        }
+
+        for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
+                begin = vma->vm_start;
+                end = vma->vm_end;
+                expose_vm_region(task_mm, begin, end, toggle, &count, list);
+        }
+        return count;
 }
 
 static ssize_t default_read_file(struct file *file, char __user *buf,
                  size_t count, loff_t *ppos)
 {
-	char test[] = "hello world";
-	int len = strlen(test);
-	int ret, i;
-	long pid;
+	char count_pages[25];
+	int ret, i, toggle, len;
+	long pid, num_pages;
+	struct task_struct *p;
 	struct dentry *dentry;
 	char filename[6] = "";
 	char parent_dir[30] = "";
 	char pid_str[6] = "";
 
+	i = 0;
 	dentry = file_dentry(file);
 	strcpy(filename, dentry->d_name.name);
 	strcpy(parent_dir, dentry->d_parent->d_name.name);
 
-	//pid = extract_pid(parent_dir);
-	i = 0;
+	/* Toggle = 1 for total pages and toggle = 0 for zero pages*/
+	if(strcmp(filename, "total") == 0)
+		toggle = 1;
+	else
+		toggle = 0;
+
 	while(parent_dir[i] != '.') {
 		pid_str[i] = parent_dir[i];
 		i++;
@@ -127,10 +141,16 @@ static ssize_t default_read_file(struct file *file, char __user *buf,
                 return -EINVAL;
         pr_info("Extracted PID: %ld", pid);
 
+	p = find_task_by_vpid(pid);
+	num_pages = calculate_pages(p, toggle);
+	sprintf(count_pages,"%ld\n",num_pages);
+	len = strlen(count);
+
 	if (*ppos > 0)
 		return 0;
 
-	ret = copy_to_user(buf,test,len);
+
+	ret = copy_to_user(buf, count_pages, len);
 	*ppos += len;
 	if(ret)
 		return -EFAULT;
@@ -363,29 +383,6 @@ void parse(char *name)
 	}
 }
 
-static long calculate_total(struct task_struct *task)
-{
-	struct mm_struct *task_mm;
-	struct vm_area_struct *vma;
-	unsigned long begin, end, curr;
-	long total;
-
-	task_mm = get_task_mm(task);
-	if (!task_mm) {
-		pr_info("Couldn't get mm for this process");
-                return 0;
-	}
-
-	total = 0;
-	for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
-		begin = vma->vm_start;
-		end = vma->vm_end;
-		for (curr = begin; curr < end; curr += PAGE_SIZE)
-			total += check_pte_for_addr(task_mm, curr);
-	}
-	return total;
-}
-
 static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 {
 	pr_info("Inside %s", __func__);
@@ -412,10 +409,6 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 		strcat(subdir_name, task_name);
 
 		ppage_create_dir(sb, dir, subdir_name);
-
-		/* Get total physical pages of process p */
-		//total_pages = calculate_total(p);
-		//pr_info("# of Total Pages: %ld", total_pages);
 	}
 	read_unlock(&tasklist_lock);
         return 0;

@@ -1,9 +1,11 @@
 #include <asm/pgtable.h>
+#include "ppagewalk.h"
 
 static int expose_page_range(struct mm_struct *target_mm,
 			    pmd_t *pmd,
 			    unsigned long va_curr,
-			    unsigned long va_end)
+			    unsigned long va_end, int toggle, long *count,
+			    struct page_iter_list *list)
 {
 	int ret = 0;
 	pte_t *pte;
@@ -34,7 +36,8 @@ out_sem:
 static int expose_pte_range(struct mm_struct *target_mm,
 			    pud_t *pud,
 			    unsigned long va_curr,
-			    unsigned long va_end)
+			    unsigned long va_end, int toggle, long *count,
+			    struct page_iter_list *list)
 {
 	int ret = 0;
 	pmd_t *pmd;
@@ -48,8 +51,8 @@ static int expose_pte_range(struct mm_struct *target_mm,
 	up_read(&target_mm->mmap_sem);
 
 	do {
-		ret = expose_page_range(target_mm, pmd,
-				       va_curr, va_end);
+		ret = expose_page_range(target_mm, pmd, va_curr, va_end, 
+				toggle, count, list);
 		if (ret < 0)
 			goto out;
 		va_curr = ((va_curr + PAGE_SIZE) & PAGE_MASK);
@@ -65,7 +68,8 @@ out_sem:
 static int expose_pmd_range(struct mm_struct *target_mm,
 			    p4d_t *p4d,
 			    unsigned long va_curr,
-			    unsigned long va_end)
+			    unsigned long va_end, int toggle, long *count,
+			    struct page_iter_list *list)
 {
 	int ret = 0;
 	pud_t *pud;
@@ -79,8 +83,8 @@ static int expose_pmd_range(struct mm_struct *target_mm,
 	up_read(&target_mm->mmap_sem);
 
 	do {
-		ret = expose_pte_range(target_mm, pud, 
-						va_curr, va_end);
+		ret = expose_pte_range(target_mm, pud, va_curr, va_end, 
+				toggle, count, list);
 		if (ret < 0)
 			goto out;
 		va_curr = ((va_curr + PMD_SIZE) & PMD_MASK);
@@ -96,7 +100,8 @@ out_sem:
 static int expose_pud_range(struct mm_struct *target_mm,
 			    pgd_t *pgd,
 			    unsigned long va_curr,
-			    unsigned long va_end)
+			    unsigned long va_end, int toggle, long *count,
+			    struct page_iter_list *list)
 {
 	int ret = 0;
 	p4d_t *p4d;
@@ -111,8 +116,8 @@ static int expose_pud_range(struct mm_struct *target_mm,
 
 	printk(KERN_ERR "\t\t%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
-		ret = expose_pmd_range(target_mm, p4d,
-				       va_curr, va_end);
+		ret = expose_pmd_range(target_mm, p4d, va_curr, va_end, 
+				toggle, count, list);
 		if (ret < 0)
 			goto out;
 		va_curr = (va_curr + PUD_SIZE) & PUD_MASK;
@@ -127,7 +132,8 @@ out_sem:
 
 static int expose_p4d_range(struct mm_struct *target_mm,
 			    unsigned long va_curr,
-			    unsigned long va_end)
+			    unsigned long va_end, int toggle, long *count, 
+			    struct page_iter_list *list)
 {
 	int ret = 0;
 	pgd_t *pgd;
@@ -141,8 +147,8 @@ static int expose_p4d_range(struct mm_struct *target_mm,
 	up_read(&target_mm->mmap_sem);
 
 	do {
-		ret = expose_pud_range(target_mm, pgd,
-				       va_curr, va_end);
+		ret = expose_pud_range(target_mm, pgd, va_curr, va_end, toggle,
+				count, list);
 		if (ret < 0)
 			goto out;
 		va_curr = (va_curr + P4D_SIZE) & P4D_MASK;
@@ -156,9 +162,10 @@ out_sem:
 
 }
 
-static int expose_vm_region(struct mm_struct *target_mm,
+int expose_vm_region(struct mm_struct *target_mm,
 				unsigned long begin_vaddr,
-				unsigned long end_vaddr)
+				unsigned long end_vaddr, int toggle, 
+				long *count, struct page_iter_list *list)
 {
 	unsigned long va_curr = begin_vaddr;
 	unsigned long va_end = end_vaddr;
@@ -166,8 +173,9 @@ static int expose_vm_region(struct mm_struct *target_mm,
 
 	printk(KERN_ERR "%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
-		ret = expose_p4d_range(target_mm, 
-						va_curr, va_end);
+		ret = expose_p4d_range(target_mm, va_curr, va_end, toggle,
+			       	count, list);
+
 		if (ret < 0)
 			goto out;
 		va_curr = (va_curr + P4D_SIZE) & PGDIR_MASK;
