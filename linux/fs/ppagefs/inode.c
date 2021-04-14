@@ -88,11 +88,11 @@ static long calculate_pages(struct task_struct *task, int toggle)
         struct mm_struct *task_mm;
         struct vm_area_struct *vma;
         unsigned long begin, end, curr;
-        struct page_iter_list *list;
         long count;
+	int ret;
 
         count = 0;
-        INIT_LIST_HEAD(&list->page_list);
+        LIST_HEAD(pfn_list);
 
         task_mm = get_task_mm(task);
         if (!task_mm) {
@@ -103,8 +103,13 @@ static long calculate_pages(struct task_struct *task, int toggle)
         for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
                 begin = vma->vm_start;
                 end = vma->vm_end;
-                expose_vm_region(task_mm, begin, end, toggle, &count, list);
+		pr_info("VMA || start %lu, end %lu", begin, end);
+                ret = expose_vm_region(task_mm, begin, end, toggle, &count, &pfn_list);
+		pr_info("returned from expose_vm_region");
+		if (ret < 0)
+			return ret;
         }
+	pr_info("COUNT VAL: %ld", count);
         return count;
 }
 
@@ -113,13 +118,15 @@ static ssize_t default_read_file(struct file *file, char __user *buf,
 {
 	char count_pages[25];
 	int ret, i, toggle, len;
-	long pid, num_pages;
+	long num_pages = 0, pid;
 	struct task_struct *p;
 	struct dentry *dentry;
 	char filename[6] = "";
 	char parent_dir[30] = "";
 	char pid_str[6] = "";
 
+	if (*ppos > 0)
+		return 0;
 	i = 0;
 	dentry = file_dentry(file);
 	strcpy(filename, dentry->d_name.name);
@@ -139,21 +146,27 @@ static ssize_t default_read_file(struct file *file, char __user *buf,
 	ret = kstrtol(pid_str, 10, &pid);
         if (ret)
                 return -EINVAL;
-        pr_info("Extracted PID: %ld", pid);
+        pr_info("Extracted PID: %d", pid);
 
+	read_lock(&tasklist_lock);
 	p = find_task_by_vpid(pid);
-	num_pages = calculate_pages(p, toggle);
+	read_unlock(&tasklist_lock);
+
+	if (p)
+		num_pages = calculate_pages(p, toggle);
+	pr_info("num_pages val retuned %ld", num_pages);
+	if (num_pages < 0)
+		return -1;
+
 	sprintf(count_pages,"%ld\n",num_pages);
-	len = strlen(count);
-
-	if (*ppos > 0)
-		return 0;
-
+	len = strlen(count_pages);
+	pr_info("Buffer: %s", count_pages);
 
 	ret = copy_to_user(buf, count_pages, len);
-	*ppos += len;
 	if(ret)
 		return -EFAULT;
+	pr_info("PARTAYYYY");
+	*ppos += len;
 
 	return len;
 }
