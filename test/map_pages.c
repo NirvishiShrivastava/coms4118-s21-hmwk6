@@ -10,8 +10,59 @@
 
 void do_inspect_pages(int pid)
 {
-//TODO: Implement do_inspect_pages function
+    char subdir_name[30] = "/mnt/";
+    FILE *fp;
+    DIR *d;
+    char *token_pid;
+    char ch, s[2] = ".", pid_str[10];
+    struct dirent *dir;
+
+    sprintf(pid_str,"%d",pid);
+    
+    /* extract sub directory name from pid */
+    d = opendir("/mnt");
+    if (d) {
+        while ((dir = readdir(d)) != NULL) {
+            printf("%s\n", dir->d_name);
+            token_pid = strtok(dir->d_name, s);
+            
+            if(strcmp(token_pid,pid_str) == 0) {
+                /* Form subdir path */
+                strcat(subdir_name,dir->d_name);
+                break;
+            }
+        }
+        closedir(d);
+    }
+        
+    /* Read total pages*/
+    fp = fopen(strcat(subdir_name,"/total"), "r");
+    
+    if (fp == NULL) {
+        perror("Error while opening the file.\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    while((ch = fgetc(fp)) != EOF)
+        printf("%c\n", ch);
+    
+    fclose(fp);
+    
+    /* Read Zero */
+    /*fp = fopen(strcat(subdir_name,"/zero"), "r");
+    
+    if (fp == NULL) {
+        perror("Error while opening the file.\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    while((ch = fgetc(fp)) != EOF)
+        printf("%c\n", ch);
+    
+    fclose(fp); */
+    
 }
+
 
 int main(void)
 {
