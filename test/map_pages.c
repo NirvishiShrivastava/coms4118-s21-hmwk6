@@ -37,17 +37,21 @@ void do_inspect_pages(int pid)
 		}
 		closedir(d);
 	}
+
+	if(chdir(subdir_name)== -1)
+		perror("Error changing directory");
+
+	system("/bin/ls > /dev/null");
 	
 	/* Read total */
-	strcat(subdir_name,"/total");
-	fp = fopen(subdir_name, "r");
+	fp = fopen("total", "r");
 	printf("File opening - %s\n",subdir_name);
 	
 	if (fp == NULL) {
 		perror("Error while opening the file");
 		exit(EXIT_FAILURE);
 	}
-	
+
 	while((ch = fgetc(fp)) != EOF)
 		printf("%c", ch);
 	
