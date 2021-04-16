@@ -240,45 +240,45 @@ static void __ppagefs_file_removed(struct dentry *dentry)
 	if ((unsigned long)fsd & PPAGEFS_FSDATA_IS_REAL_FOPS_BIT)
 		return;
 	if (!refcount_dec_and_test(&fsd->active_users)) {
-		pr_info("About to call wait_for_completion");
-		pr_info("Test");
+		//pr_info("About to call wait_for_completion");
+		//pr_info("Test");
 		wait_for_completion(&fsd->active_users_drained);
-		pr_info("ABC");
+		//pr_info("ABC");
 	}
-	pr_info("DEF");
+	//pr_info("DEF");
 }
 
 static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 {
 	int ret = 0;
-	pr_info("dentry to be removed %s", dentry->d_name.name);
 	pr_info("Inside %s", __func__);
+	pr_info("dentry to be removed %s", dentry->d_name.name);
 	if (simple_positive(dentry)) {
-		pr_info("Entered if cond");
+		//pr_info("Entered if cond");
 		dget(dentry);
 		if (d_is_dir(dentry)) {
-			pr_info("dentry is a dir");
+			//pr_info("dentry is a dir");
 			ret = simple_rmdir(d_inode(parent), dentry);
 			if (!ret)
 				fsnotify_rmdir(d_inode(parent), dentry);
 		} else {
-			pr_info("dentry is not a dir");
+			//pr_info("dentry is not a dir");
 			simple_unlink(d_inode(parent), dentry);
 			fsnotify_unlink(d_inode(parent), dentry);
 		}
-		pr_info("XYZ");
+		//pr_info("XYZ");
 		if (!ret) {
-			pr_info("Calling d_delete");
-			pr_info("##########");
+			//pr_info("Calling d_delete");
+			//pr_info("##########");
 			d_delete(dentry);
-			pr_info("Returned from d_delete");
-			pr_info("&&&&&&&");
+			//pr_info("Returned from d_delete");
+			//pr_info("&&&&&&&");
 		}
 		if (d_is_reg(dentry)) {
-			pr_info("About to call __ppagefs_file_removed");
+			//pr_info("About to call __ppagefs_file_removed");
 			__ppagefs_file_removed(dentry);
 		}
-		pr_info("Calling dput");
+		//pr_info("Calling dput");
 		dput(dentry);
 	}
 	return ret;
@@ -308,6 +308,7 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 
 		/* perhaps simple_empty(child) makes more sense */
 		if (!list_empty(&child->d_subdirs)) {
+			pr_info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKING if child has children");
 			spin_unlock(&parent->d_lock);
 			inode_unlock(d_inode(parent));
 			parent = child;
@@ -513,9 +514,28 @@ static int ppagefs_root_dir_open(struct inode *inode, struct file *file)
 	struct dentry *dentry, *child;
 
 	dentry = file_dentry(file);
+	pr_info("*************************** ROOT DENTRY IS: %s", dentry->d_name.name);
 
-	ppagefs_remove_recursive(dentry);
-
+	if(!list_empty(&dentry->d_subdirs))
+	{	
+	
+	/*	inode_lock(d_inode(dentry));
+		spin_lock(&dentry->d_lock);
+	*/
+		pr_info("*********************** INSIDE IF BLOCK");
+		list_for_each_entry(child, &dentry->d_subdirs, d_child){
+			
+			pr_info("*********************** CHILD DENTRY IDENTIFIED %s", child->d_name.name);
+			ppagefs_remove_recursive(child);
+			pr_info("*********************** CHILD REMOVED back from remove recursive");
+		}
+	/*
+		spin_unlock(&dentry->d_lock);
+		inode_unlock(d_inode(dentry));
+	*/
+	
+	}
+	//ppagefs_remove_recursive(dentry);
 	if (ppage_create_subdir(sb, sb->s_root) < 0)
 		return -ENOMEM;
 
