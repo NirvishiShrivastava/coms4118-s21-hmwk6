@@ -113,7 +113,7 @@ static long calculate_pages(struct task_struct *task, int toggle)
         return count;
 }
 
-static ssize_t default_read_file(struct file *file, char __user *buf,
+static ssize_t ppagefs_read_file(struct file *file, char __user *buf,
                  size_t count, loff_t *ppos)
 {
 	char count_pages[25];
@@ -184,7 +184,7 @@ const struct inode_operations ppagefs_file_inode_operations = {
 };
 
 const struct file_operations ppagefs_file_operations = {
-	.read		= default_read_file,
+	.read		= ppagefs_read_file,
 	.write		= default_write_file,
 	.open		= simple_open,
 	// .mmap		= generic_file_mmap,
@@ -228,7 +228,7 @@ struct dentry *ppage_create_file(struct super_block *sb,
 static void __ppagefs_file_removed(struct dentry *dentry)
 {
 	struct ppagefs_fsdata *fsd;
-
+	pr_info("Inside %s", __func__);
 	/*
 	 * Paired with the closing smp_mb() implied by a successful
 	 * cmpxchg() in debugfs_file_get(): either
@@ -239,28 +239,46 @@ static void __ppagefs_file_removed(struct dentry *dentry)
 	fsd = READ_ONCE(dentry->d_fsdata);
 	if ((unsigned long)fsd & PPAGEFS_FSDATA_IS_REAL_FOPS_BIT)
 		return;
-	if (!refcount_dec_and_test(&fsd->active_users))
+	if (!refcount_dec_and_test(&fsd->active_users)) {
+		pr_info("About to call wait_for_completion");
+		pr_info("Test");
 		wait_for_completion(&fsd->active_users_drained);
+		pr_info("ABC");
+	}
+	pr_info("DEF");
 }
 
 static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 {
 	int ret = 0;
-
+	pr_info("dentry to be removed %s", dentry->d_name.name);
+	pr_info("Inside %s", __func__);
 	if (simple_positive(dentry)) {
+		pr_info("Entered if cond");
 		dget(dentry);
 		if (d_is_dir(dentry)) {
+			pr_info("dentry is a dir");
 			ret = simple_rmdir(d_inode(parent), dentry);
 			if (!ret)
 				fsnotify_rmdir(d_inode(parent), dentry);
 		} else {
+			pr_info("dentry is not a dir");
 			simple_unlink(d_inode(parent), dentry);
 			fsnotify_unlink(d_inode(parent), dentry);
 		}
-		if (!ret)
+		pr_info("XYZ");
+		if (!ret) {
+			pr_info("Calling d_delete");
+			pr_info("##########");
 			d_delete(dentry);
-		if (d_is_reg(dentry))
+			pr_info("Returned from d_delete");
+			pr_info("&&&&&&&");
+		}
+		if (d_is_reg(dentry)) {
+			pr_info("About to call __ppagefs_file_removed");
 			__ppagefs_file_removed(dentry);
+		}
+		pr_info("Calling dput");
 		dput(dentry);
 	}
 	return ret;
@@ -320,9 +338,11 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 	if (child != dentry)
 		/* go up */
 		goto loop;
+	
 
 	if (!__ppagefs_remove(child, parent))
 		simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
+
 	inode_unlock(d_inode(parent));
 }
 
@@ -364,6 +384,8 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 	struct dentry *dentry;
 	struct inode *inode;
 	struct qstr qname;
+	char total_file_name[] = "total";
+	char zero_file_name[] = "zero";
 
 	qname.name = name;
 	qname.len = strlen(name);
@@ -380,9 +402,16 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 	}
 
 	inode->i_op = &simple_dir_inode_operations;
-	inode->i_fop = &ppagefs_subdir_operations;
+	inode->i_fop = &simple_dir_operations;
 
 	d_add(dentry, inode);
+
+	if (ppage_create_file(sb, dentry, total_file_name) < 0)
+		return -ENOMEM;
+
+	if (ppage_create_file(sb, dentry, zero_file_name) < 0)
+		return -ENOMEM;
+
 	return dentry;
 
 };
