@@ -420,7 +420,7 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 void parse(char *name)
 {
 	while(*name != '\0') {
-		if(*name == '/' || *name == ':')
+		if(*name == '/')
 			*name = '-';
 		name++;
 	}
