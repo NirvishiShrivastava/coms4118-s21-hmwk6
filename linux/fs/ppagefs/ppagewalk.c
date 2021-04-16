@@ -2,7 +2,9 @@
 #include "ppagewalk.h"
 #include <linux/slab.h>
 #include <asm/pgtable_64_types.h>
+#include <asm/page.h>
 
+#define pfn_to_virt(pfn)	__va((pfn) << PAGE_SHIFT)
 #define PGD_SIZE	(PTRS_PER_PGD * sizeof(pgd_t))
 
 bool traverse(struct list_head *head, unsigned long pfn)
@@ -27,6 +29,8 @@ static int expose_page_range(struct mm_struct *target_mm,
 	struct page *page;
 	unsigned long pfn;
 	struct page_iter_list *node;
+	unsigned long *virt_addr;
+	void *zero_buf;
 
 	down_read(&target_mm->mmap_sem);
 	pte = pte_offset_map(pmd, va_curr);
@@ -47,6 +51,11 @@ static int expose_page_range(struct mm_struct *target_mm,
 				 * TODO: Find Zero pages
 				 */
 				pr_info("Zero Pages Block");
+				virt_addr = pfn_to_virt(pfn);
+				zero_buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+				if (memcmp(virt_addr, zero_buf, PAGE_SIZE) == 0
+					|| pfn_to_page(pfn) == ZERO_PAGE(0))
+					*count += 1;
 			}
 			node = kmalloc(sizeof(struct page_iter_list), GFP_KERNEL);
 			if (!node) {
