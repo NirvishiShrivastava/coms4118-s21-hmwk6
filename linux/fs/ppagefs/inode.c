@@ -276,6 +276,45 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 	inode_unlock(d_inode(parent));
 }
 
+struct dentry *ppagefs_simple_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
+{
+	pr_info("inside %s", __func__);
+	pr_info("DENTRY PASSED IS : %s",dentry->d_name.name);
+	char total_file_name[] = "total";
+        char zero_file_name[] = "zero";
+	struct inode *inode;
+	if(d_inode(dentry) != NULL){
+		pr_info("INODE IS NOT EQUAL to NULL");
+		return dentry;
+	}
+
+	pr_info("Making new inode");
+	inode = ppagefs_make_inode(dentry->d_sb, S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
+
+	if (!inode) {
+		pr_info("INODE could not be created");
+                dput(dentry);
+                return NULL;
+    	}
+	pr_info("Setting inode OPS");
+    	inode->i_op = &simple_dir_inode_operations;
+    	inode->i_fop = &simple_dir_operations;
+	pr_info("Updating DCache");
+    	d_add(dentry, inode);
+
+    	if (ppagefs_create_file(dentry->d_sb, dentry, total_file_name) < 0)
+            return ERR_PTR(-ENOMEM);
+
+    	if (ppagefs_create_file(dentry->d_sb, dentry, zero_file_name) < 0)
+            return ERR_PTR(-ENOMEM);
+
+	pr_info("RETURNING from LOOKUP");
+	return NULL;
+}
+
+static const struct inode_operations ppagefs_dir_inode_operations = {
+	.lookup		= ppagefs_simple_lookup,
+};
 
 struct dentry *ppagefs_create_dir(struct super_block *sb,
 		struct dentry *dir, const char *name)
@@ -438,6 +477,7 @@ static int ppagefs_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (err)
 		goto fail;
 	inode = d_inode(sb->s_root);
+	inode->i_op = &ppagefs_dir_inode_operations;
 	inode->i_fop = &ppagefs_root_dir_operations;
 
 fail:
