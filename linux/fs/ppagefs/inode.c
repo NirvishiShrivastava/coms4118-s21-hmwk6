@@ -37,33 +37,6 @@ struct ppagefs_fsdata {
 	struct completion active_users_drained;
 };
 
-static int check_pte_for_addr(struct mm_struct *mm, unsigned long addr)
-{
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
-	
-	pgd = pgd_offset(mm, addr);
-	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-		goto out;
-	p4d = p4d_offset(pgd, addr);
-	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
-		goto out;
-	pud = pud_offset(p4d, addr);
-	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-		goto out;
-	pmd = pmd_offset(pud, addr);
-	if (!(pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))) {
-		pte = pte_offset_map(pmd, addr);
-		if (!pte_none(*pte))
-			return 1;
-	}
-out:
-	return 0;
-}
-
 static struct inode *ppage_make_inode(struct super_block *sb,
                    int mode)
 {
@@ -187,12 +160,7 @@ const struct file_operations ppagefs_file_operations = {
 	.read		= ppagefs_read_file,
 	.write		= default_write_file,
 	.open		= simple_open,
-	// .mmap		= generic_file_mmap,
-	//.fsync		= noop_fsync,
-	//.splice_read	= generic_file_splice_read,
-	//.splice_write	= iter_file_splice_write,
 	.llseek		= noop_llseek,
-	// .get_unmapped_area	= ramfs_mmu_get_unmapped_area,
 };
 
 struct dentry *ppage_create_file(struct super_block *sb,
@@ -229,23 +197,13 @@ static void __ppagefs_file_removed(struct dentry *dentry)
 {
 	struct ppagefs_fsdata *fsd;
 	pr_info("Inside %s", __func__);
-	/*
-	 * Paired with the closing smp_mb() implied by a successful
-	 * cmpxchg() in debugfs_file_get(): either
-	 * debugfs_file_get() must see a dead dentry or we must see a
-	 * debugfs_fsdata instance at ->d_fsdata here (or both).
-	 */
 	smp_mb();
 	fsd = READ_ONCE(dentry->d_fsdata);
 	if ((unsigned long)fsd & PPAGEFS_FSDATA_IS_REAL_FOPS_BIT)
 		return;
 	if (!refcount_dec_and_test(&fsd->active_users)) {
-		//pr_info("About to call wait_for_completion");
-		//pr_info("Test");
 		wait_for_completion(&fsd->active_users_drained);
-		//pr_info("ABC");
 	}
-	//pr_info("DEF");
 }
 
 static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
@@ -254,31 +212,21 @@ static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 	pr_info("Inside %s", __func__);
 	pr_info("dentry to be removed %s", dentry->d_name.name);
 	if (simple_positive(dentry)) {
-		//pr_info("Entered if cond");
 		dget(dentry);
 		if (d_is_dir(dentry)) {
-			//pr_info("dentry is a dir");
 			ret = simple_rmdir(d_inode(parent), dentry);
 			if (!ret)
 				fsnotify_rmdir(d_inode(parent), dentry);
 		} else {
-			//pr_info("dentry is not a dir");
 			simple_unlink(d_inode(parent), dentry);
 			fsnotify_unlink(d_inode(parent), dentry);
 		}
-		//pr_info("XYZ");
 		if (!ret) {
-			//pr_info("Calling d_delete");
-			//pr_info("##########");
 			d_delete(dentry);
-			//pr_info("Returned from d_delete");
-			//pr_info("&&&&&&&");
 		}
 		if (d_is_reg(dentry)) {
-			//pr_info("About to call __ppagefs_file_removed");
 			__ppagefs_file_removed(dentry);
 		}
-		//pr_info("Calling dput");
 		dput(dentry);
 	}
 	return ret;
@@ -296,17 +244,11 @@ void ppagefs_remove_recursive(struct dentry *dentry)
  down:
 	inode_lock(d_inode(parent));
  loop:
-	/*
-	 * The parent->d_subdirs is protected by the d_lock. Outside that
-	 * lock, the child can be unlinked and set to be freed which can
-	 * use the d_u.d_child as the rcu head and corrupt this list.
-	 */
 	spin_lock(&parent->d_lock);
 	list_for_each_entry(child, &parent->d_subdirs, d_child) {
 		if (!simple_positive(child))
 			continue;
 
-		/* perhaps simple_empty(child) makes more sense */
 		if (!list_empty(&child->d_subdirs)) {
 			pr_info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKING if child has children");
 			spin_unlock(&parent->d_lock);
@@ -320,13 +262,6 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 		if (!__ppagefs_remove(child, parent))
 			simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
 
-		/*
-		 * The parent->d_lock protects agaist child from unlinking
-		 * from d_subdirs. When releasing the parent->d_lock we can
-		 * no longer trust that the next pointer is valid.
-		 * Restart the loop. We'll skip this one with the
-		 * simple_positive() check.
-		 */
 		goto loop;
 	}
 	spin_unlock(&parent->d_lock);
@@ -347,36 +282,6 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 	inode_unlock(d_inode(parent));
 }
 
-
-static int ppagefs_subdir_open(struct inode *inode, struct file *file)
-{
-	pr_info("Inside %s", __func__);
-	struct super_block *sb = inode->i_sb;
-	struct dentry *dentry, *child;
-	char total_file_name[] = "total";
-	char zero_file_name[] = "zero";
-
-	dentry = file_dentry(file);
-
-	ppagefs_remove_recursive(dentry);
-
-	if (ppage_create_file(sb, dentry, total_file_name) < 0)
-		return -ENOMEM;
-
-	if (ppage_create_file(sb, dentry, zero_file_name) < 0)
-		return -ENOMEM;
-
-	return dcache_dir_open(inode, file);
-}
-
-const struct file_operations ppagefs_subdir_operations = {
-	.open =		ppagefs_subdir_open,
-	.release =	dcache_dir_close,
-	.llseek =	dcache_dir_lseek,
-	.read =		generic_read_dir,
-	.iterate =	dcache_readdir,
-	.fsync =	noop_fsync,
-};
 
 struct dentry *ppage_create_dir(struct super_block *sb,
                 struct dentry *dir, const char *name)
@@ -535,7 +440,6 @@ static int ppagefs_root_dir_open(struct inode *inode, struct file *file)
 	*/
 	
 	}
-	//ppagefs_remove_recursive(dentry);
 	if (ppage_create_subdir(sb, sb->s_root) < 0)
 		return -ENOMEM;
 
