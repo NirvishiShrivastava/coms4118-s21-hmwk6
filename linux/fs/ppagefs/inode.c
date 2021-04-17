@@ -121,6 +121,8 @@ static ssize_t ppagefs_read_file(struct file *file, char __user *buf,
 
 	if (p)
 		num_pages = calculate_pages(p, toggle);
+	else
+		return -ESRCH;
 
 	if (num_pages < 0)
 		return -1;
@@ -276,39 +278,87 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 	inode_unlock(d_inode(parent));
 }
 
+static int validate_dir_name(char *dir_name)
+{
+	long pid;
+	char process_id[10], process_name[16];
+	char task_name[16];
+	int i, ret;
+	struct task_struct *p;
+
+	i = 0;
+	while(*dir_name != '\0') {
+		if (*dir_name == '.') {
+			dir_name++;
+			break;
+		}
+		process_id[i] = *dir_name;
+		i++;
+		dir_name++;
+	}
+	process_id[i] = '\0';
+
+	i = 0;
+	while(*dir_name != '\0') {
+		process_name[i] = *dir_name;
+		i++;
+		dir_name++;
+	}
+	process_name[i] = '\0';
+
+	ret = kstrtol(process_id, 10, &pid);
+	if (ret)
+		return ret;
+
+	read_lock(&tasklist_lock);
+	p = find_task_by_vpid(pid);
+	read_unlock(&tasklist_lock);
+
+	if (!p)
+		return -ESRCH;
+
+	get_task_comm(task_name, p);
+	if (strcmp(process_name, task_name) == 0)
+		return 1;
+	else
+		return -ESRCH;
+}
+
 struct dentry *ppagefs_simple_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 {
-	pr_info("inside %s", __func__);
-	pr_info("DENTRY PASSED IS : %s",dentry->d_name.name);
 	char total_file_name[] = "total";
-        char zero_file_name[] = "zero";
+	char zero_file_name[] = "zero";
 	struct inode *inode;
-	if(d_inode(dentry) != NULL){
-		pr_info("INODE IS NOT EQUAL to NULL");
-		return dentry;
-	}
+	int ret;
+	char dir_path[25];
 
-	pr_info("Making new inode");
+	if (d_inode(dentry) != NULL)
+		return dentry;
+
+	strcpy(dir_path, dentry->d_name.name);
+	ret = validate_dir_name(dir_path);
+
+	if (ret < 0)
+		return ERR_PTR(ret);
+
 	inode = ppagefs_make_inode(dentry->d_sb, S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
 
 	if (!inode) {
-		pr_info("INODE could not be created");
-                dput(dentry);
-                return NULL;
-    	}
-	pr_info("Setting inode OPS");
-    	inode->i_op = &simple_dir_inode_operations;
-    	inode->i_fop = &simple_dir_operations;
-	pr_info("Updating DCache");
-    	d_add(dentry, inode);
+		dput(dentry);
+		return NULL;
+	}
 
-    	if (ppagefs_create_file(dentry->d_sb, dentry, total_file_name) < 0)
-            return ERR_PTR(-ENOMEM);
+	inode->i_op = &simple_dir_inode_operations;
+	inode->i_fop = &simple_dir_operations;
 
-    	if (ppagefs_create_file(dentry->d_sb, dentry, zero_file_name) < 0)
-            return ERR_PTR(-ENOMEM);
+	d_add(dentry, inode);
 
-	pr_info("RETURNING from LOOKUP");
+	if (ppagefs_create_file(dentry->d_sb, dentry, total_file_name) < 0)
+		return ERR_PTR(-ENOMEM);
+
+	if (ppagefs_create_file(dentry->d_sb, dentry, zero_file_name) < 0)
+		return ERR_PTR(-ENOMEM);
+
 	return NULL;
 }
 
@@ -352,7 +402,7 @@ struct dentry *ppagefs_create_dir(struct super_block *sb,
 
 	return dentry;
 
-};
+}
 
 void parse(char *name)
 {
