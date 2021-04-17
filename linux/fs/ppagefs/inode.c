@@ -1,6 +1,6 @@
 /*
  * linux/fs/ppagefs/inode.c
- * This is a psuedo file system that exports kernel information
+ * This is a pseudo file system that exports kernel information
  * about the process physical page usage of currently
  * running process.
  */
@@ -37,13 +37,12 @@ struct ppagefs_fsdata {
 	struct completion active_users_drained;
 };
 
-static struct inode *ppage_make_inode(struct super_block *sb,
-                   int mode)
+static struct inode *ppage_make_inode(struct super_block *sb, int mode)
 {
 	struct inode *inode;
-	
+
 	inode = new_inode(sb);
-	
+
 	if (!inode)
 		return NULL;
 
@@ -58,45 +57,40 @@ static struct inode *ppage_make_inode(struct super_block *sb,
 
 static long calculate_pages(struct task_struct *task, int toggle)
 {
-        struct mm_struct *task_mm;
-        struct vm_area_struct *vma;
-        unsigned long begin, end, curr;
-        long count;
+	struct mm_struct *task_mm;
+	struct vm_area_struct *vma;
+	unsigned long begin, end, curr;
+	long count;
 	int ret;
 
-        count = 0;
-        LIST_HEAD(pfn_list);
+	count = 0;
+	LIST_HEAD(pfn_list);
 
-        task_mm = get_task_mm(task);
-        if (!task_mm) {
-                pr_info("Couldn't get mm for this process");
-                return 0;
-        }
+	task_mm = get_task_mm(task);
 
-        for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
-                begin = vma->vm_start;
-                end = vma->vm_end;
-		pr_info("VMA || start %lu, end %lu", begin, end);
-                ret = expose_vm_region(task_mm, begin, end, toggle, &count, &pfn_list);
-		pr_info("returned from expose_vm_region");
+	if (!task_mm)
+		return 0;
+
+	for (vma = task_mm->mmap; vma; vma = vma->vm_next) {
+		begin = vma->vm_start;
+		end = vma->vm_end;
+		ret = expose_vm_region(task_mm, begin, end, toggle,
+				&count, &pfn_list);
 		if (ret < 0)
 			return ret;
-        }
-	pr_info("COUNT VAL: %ld", count);
-        return count;
+	}
+	return count;
 }
 
 static ssize_t ppagefs_read_file(struct file *file, char __user *buf,
-                 size_t count, loff_t *ppos)
+		size_t count, loff_t *ppos)
 {
-	char count_pages[25];
 	int ret, i, toggle, len;
 	long num_pages = 0, pid;
 	struct task_struct *p;
 	struct dentry *dentry;
-	char filename[6] = "";
-	char parent_dir[30] = "";
-	char pid_str[6] = "";
+	char parent_dir[30] = "", pid_str[6] = "";
+	char filename[6] = "", count_pages[25];
 
 	if (*ppos > 0)
 		return 0;
@@ -106,20 +100,19 @@ static ssize_t ppagefs_read_file(struct file *file, char __user *buf,
 	strcpy(parent_dir, dentry->d_parent->d_name.name);
 
 	/* Toggle = 1 for total pages and toggle = 0 for zero pages*/
-	if(strcmp(filename, "total") == 0)
+	if (strcmp(filename, "total") == 0)
 		toggle = 1;
 	else
 		toggle = 0;
 
-	while(parent_dir[i] != '.') {
+	while (parent_dir[i] != '.') {
 		pid_str[i] = parent_dir[i];
 		i++;
 	}
 
 	ret = kstrtol(pid_str, 10, &pid);
-        if (ret)
-                return -EINVAL;
-        pr_info("Extracted PID: %d", pid);
+	if (ret)
+		return -EINVAL;
 
 	read_lock(&tasklist_lock);
 	p = find_task_by_vpid(pid);
@@ -127,25 +120,23 @@ static ssize_t ppagefs_read_file(struct file *file, char __user *buf,
 
 	if (p)
 		num_pages = calculate_pages(p, toggle);
-	pr_info("num_pages val retuned %ld", num_pages);
+
 	if (num_pages < 0)
 		return -1;
 
-	sprintf(count_pages,"%ld\n",num_pages);
+	sprintf(count_pages, "%ld\n", num_pages);
 	len = strlen(count_pages);
-	pr_info("Buffer: %s", count_pages);
 
 	ret = copy_to_user(buf, count_pages, len);
-	if(ret)
+	if (ret)
 		return -EFAULT;
-	pr_info("PARTAYYYY");
 	*ppos += len;
 
 	return len;
 }
 
 static ssize_t default_write_file(struct file *file, const char __user *buf,
-                   size_t count, loff_t *ppos)
+		size_t count, loff_t *ppos)
 {
 	return count;
 }
@@ -164,9 +155,8 @@ const struct file_operations ppagefs_file_operations = {
 };
 
 struct dentry *ppage_create_file(struct super_block *sb,
-                struct dentry *dir, const char *name)
+		struct dentry *dir, const char *name)
 {
-	pr_info("Inside %s", __func__);
 	struct dentry *dentry;
 	struct inode *inode;
 	struct qstr qname;
@@ -183,7 +173,7 @@ struct dentry *ppage_create_file(struct super_block *sb,
 		dput(dentry);
 		return NULL;
 	}
-	
+
 	inode->i_op = &ppagefs_file_inode_operations;
 	inode->i_fop = &ppagefs_file_operations;
 
@@ -196,21 +186,21 @@ struct dentry *ppage_create_file(struct super_block *sb,
 static void __ppagefs_file_removed(struct dentry *dentry)
 {
 	struct ppagefs_fsdata *fsd;
-	pr_info("Inside %s", __func__);
+
+	//memory barrier
 	smp_mb();
+
 	fsd = READ_ONCE(dentry->d_fsdata);
 	if ((unsigned long)fsd & PPAGEFS_FSDATA_IS_REAL_FOPS_BIT)
 		return;
-	if (!refcount_dec_and_test(&fsd->active_users)) {
+	if (!refcount_dec_and_test(&fsd->active_users))
 		wait_for_completion(&fsd->active_users_drained);
-	}
 }
 
 static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 {
 	int ret = 0;
-	pr_info("Inside %s", __func__);
-	pr_info("dentry to be removed %s", dentry->d_name.name);
+
 	if (simple_positive(dentry)) {
 		dget(dentry);
 		if (d_is_dir(dentry)) {
@@ -221,12 +211,12 @@ static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 			simple_unlink(d_inode(parent), dentry);
 			fsnotify_unlink(d_inode(parent), dentry);
 		}
-		if (!ret) {
+		if (!ret)
 			d_delete(dentry);
-		}
-		if (d_is_reg(dentry)) {
+
+		if (d_is_reg(dentry))
 			__ppagefs_file_removed(dentry);
-		}
+
 		dput(dentry);
 	}
 	return ret;
@@ -234,7 +224,7 @@ static int __ppagefs_remove(struct dentry *dentry, struct dentry *parent)
 
 void ppagefs_remove_recursive(struct dentry *dentry)
 {
-	pr_info("Inside %s", __func__);
+
 	struct dentry *child, *parent;
 
 	if (IS_ERR_OR_NULL(dentry))
@@ -250,7 +240,6 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 			continue;
 
 		if (!list_empty(&child->d_subdirs)) {
-			pr_info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CHECKING if child has children");
 			spin_unlock(&parent->d_lock);
 			inode_unlock(d_inode(parent));
 			parent = child;
@@ -274,7 +263,6 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 	if (child != dentry)
 		/* go up */
 		goto loop;
-	
 
 	if (!__ppagefs_remove(child, parent))
 		simple_release_fs(&ppagefs_mount, &ppagefs_mount_count);
@@ -284,9 +272,8 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 
 
 struct dentry *ppage_create_dir(struct super_block *sb,
-                struct dentry *dir, const char *name)
+		struct dentry *dir, const char *name)
 {
-	pr_info("Inside %s", __func__);
 	struct dentry *dentry;
 	struct inode *inode;
 	struct qstr qname;
@@ -324,8 +311,8 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 
 void parse(char *name)
 {
-	while(*name != '\0') {
-		if(*name == '/')
+	while (*name != '\0') {
+		if (*name == '/')
 			*name = '-';
 		name++;
 	}
@@ -333,24 +320,20 @@ void parse(char *name)
 
 static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 {
-	pr_info("Inside %s", __func__);
-	char task_name[16];
+
 	struct task_struct *p;
-	long pid;
-	long total_pages, zero_pages;
-	char s_pid[6];
-	char subdir_name[30] = "";
+	long total_pages, zero_pages, pid;
+	char s_pid[6], task_name[16], subdir_name[30] = "";
 
 	read_lock(&tasklist_lock);
 
 	for_each_process(p) {
 		strcpy(subdir_name, "");
 		pid = (long)task_pid_vnr(p);
-		sprintf(s_pid,"%ld",pid);
+		sprintf(s_pid, "%ld", pid);
 
 		get_task_comm(task_name, p);
 		parse(task_name);
-		pr_info("Process name is %s\n", task_name);
 
 		strcat(subdir_name, s_pid);
 		strcat(subdir_name, ".");
@@ -359,7 +342,7 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 		ppage_create_dir(sb, dir, subdir_name);
 	}
 	read_unlock(&tasklist_lock);
-        return 0;
+	return 0;
 }
 
 struct ppagefs_mount_opts {
@@ -389,7 +372,8 @@ const struct fs_parameter_description ppagefs_fs_parameters = {
 	.specs =	ppagefs_param_specs,
 };
 
-static int ppagefs_parse_param(struct fs_context *fc, struct fs_parameter *param)
+static int ppagefs_parse_param(struct fs_context *fc,
+		struct fs_parameter *param)
 {
 	struct fs_parse_result result;
 	struct ppagefs_fs_info *fsi = fc->s_fs_info;
@@ -404,9 +388,9 @@ static int ppagefs_parse_param(struct fs_context *fc, struct fs_parameter *param
 	}
 
 	switch (opt) {
-		case Opt_mode:
-			fsi->mount_opts.mode = result.uint_32 & S_IALLUGO;
-			break;
+	case Opt_mode:
+		fsi->mount_opts.mode = result.uint_32 & S_IALLUGO;
+		break;
 	}
 	return 0;
 }
@@ -414,31 +398,14 @@ static int ppagefs_parse_param(struct fs_context *fc, struct fs_parameter *param
 
 static int ppagefs_root_dir_open(struct inode *inode, struct file *file)
 {
-	pr_info("Inside %s", __func__);
 	struct super_block *sb = inode->i_sb;
 	struct dentry *dentry, *child;
 
 	dentry = file_dentry(file);
-	pr_info("*************************** ROOT DENTRY IS: %s", dentry->d_name.name);
 
-	if(!list_empty(&dentry->d_subdirs))
-	{	
-	
-	/*	inode_lock(d_inode(dentry));
-		spin_lock(&dentry->d_lock);
-	*/
-		pr_info("*********************** INSIDE IF BLOCK");
-		list_for_each_entry(child, &dentry->d_subdirs, d_child){
-			
-			pr_info("*********************** CHILD DENTRY IDENTIFIED %s", child->d_name.name);
+	if (!list_empty(&dentry->d_subdirs)) {
+		list_for_each_entry(child, &dentry->d_subdirs, d_child)
 			ppagefs_remove_recursive(child);
-			pr_info("*********************** CHILD REMOVED back from remove recursive");
-		}
-	/*
-		spin_unlock(&dentry->d_lock);
-		inode_unlock(d_inode(dentry));
-	*/
-	
 	}
 	if (ppage_create_subdir(sb, sb->s_root) < 0)
 		return -ENOMEM;
@@ -457,15 +424,16 @@ const struct file_operations ppagefs_root_dir_operations = {
 
 static int ppagefs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
-	static const struct tree_descr ppage_files[] = {{""}};
+	static const struct tree_descr ppage_files[] = { {""} };
 	struct inode *inode;
-    	int err;
+	int err;
+
 	err = simple_fill_super(sb, PPAGEFS_MAGIC, ppage_files);
-	if(err)
+	if (err)
 		goto fail;
-    	inode = d_inode(sb->s_root);
+	inode = d_inode(sb->s_root);
 	inode->i_fop = &ppagefs_root_dir_operations;
-	
+
 fail:
 	return err;
 }

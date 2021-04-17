@@ -10,7 +10,7 @@
 bool traverse(struct list_head *head, unsigned long pfn)
 {
 	struct page_iter_list *temp;
-	pr_info("Inside func: %s", __func__);
+
 	list_for_each_entry(temp, head, page_list) {
 		if (temp->pfn == pfn)
 			return 1;
@@ -38,32 +38,25 @@ static int expose_page_range(struct mm_struct *target_mm,
 		goto out_sem;
 	up_read(&target_mm->mmap_sem);
 
-	pr_info("Value of Count: %ld", *count);
 	pfn = pte_pfn(*pte);
 	if (pfn) {
-		pr_info("######## PFN: %lu", pfn);
 		if (!traverse(list, pfn)) {
 			if (toggle == 1) {
 				*count += 1;
-			}
-			else {
-				/* 
-				 * TODO: Find Zero pages
-				 */
-				pr_info("Zero Pages Block");
+			} else {
 				virt_addr = pfn_to_virt(pfn);
 				zero_buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
 				if (memcmp(virt_addr, zero_buf, PAGE_SIZE) == 0
 					|| pfn_to_page(pfn) == ZERO_PAGE(0))
 					*count += 1;
 			}
-			node = kmalloc(sizeof(struct page_iter_list), GFP_KERNEL);
+			node = kmalloc(sizeof(struct page_iter_list),
+					GFP_KERNEL);
 			if (!node) {
 				ret = -ENOMEM;
 				goto out;
 			}
 			node->pfn = pfn;
-			pr_info("adding pfn %lu to list", pfn);
 			list_add(&node->page_list, list);
 		}
 	}
@@ -91,9 +84,8 @@ static int expose_pte_range(struct mm_struct *target_mm,
 		goto out_sem;
 	up_read(&target_mm->mmap_sem);
 
-	printk(KERN_ERR "%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
-		ret = expose_page_range(target_mm, pmd, va_curr, va_end, 
+		ret = expose_page_range(target_mm, pmd, va_curr, va_end,
 				toggle, count, list);
 		if (ret < 0)
 			goto out;
@@ -124,9 +116,8 @@ static int expose_pmd_range(struct mm_struct *target_mm,
 		goto out_sem;
 	up_read(&target_mm->mmap_sem);
 
-	printk(KERN_ERR "%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
-		ret = expose_pte_range(target_mm, pud, va_curr, va_end, 
+		ret = expose_pte_range(target_mm, pud, va_curr, va_end,
 				toggle, count, list);
 		if (ret < 0)
 			goto out;
@@ -150,16 +141,15 @@ static int expose_pud_range(struct mm_struct *target_mm,
 	p4d_t *p4d;
 
 	va_end = min((va_curr + PGDIR_SIZE) & PGDIR_MASK, va_end);
-	
+
 	down_read(&target_mm->mmap_sem);
 	p4d = p4d_offset(pgd, va_curr);
 	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
 		goto out_sem;
 	up_read(&target_mm->mmap_sem);
 
-	printk(KERN_ERR "\t\t%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
-		ret = expose_pmd_range(target_mm, p4d, va_curr, va_end, 
+		ret = expose_pmd_range(target_mm, p4d, va_curr, va_end,
 				toggle, count, list);
 		if (ret < 0)
 			goto out;
@@ -174,9 +164,9 @@ out_sem:
 }
 
 static int expose_p4d_range(struct mm_struct *target_mm,
-			    unsigned long va_curr,
-			    unsigned long va_end, int toggle, long *count, 
-			    struct list_head *list)
+		unsigned long va_curr,
+		unsigned long va_end, int toggle, long *count,
+		struct list_head *list)
 {
 	int ret = 0;
 	pgd_t *pgd;
@@ -189,7 +179,6 @@ static int expose_p4d_range(struct mm_struct *target_mm,
 		goto out_sem;
 	up_read(&target_mm->mmap_sem);
 
-	printk(KERN_ERR "%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
 		ret = expose_pud_range(target_mm, pgd, va_curr, va_end, toggle,
 				count, list);
@@ -208,17 +197,16 @@ out_sem:
 
 int expose_vm_region(struct mm_struct *target_mm,
 				unsigned long begin_vaddr,
-				unsigned long end_vaddr, int toggle, 
+				unsigned long end_vaddr, int toggle,
 				long *count, struct list_head *list)
 {
 	unsigned long va_curr = begin_vaddr;
 	unsigned long va_end = end_vaddr;
 	int ret;
 
-	printk(KERN_ERR "%s: va: %#lx - %#lx\n", __func__, va_curr, va_end);
 	do {
 		ret = expose_p4d_range(target_mm, va_curr, va_end, toggle,
-			       	count, list);
+				count, list);
 
 		if (ret < 0)
 			goto out;
