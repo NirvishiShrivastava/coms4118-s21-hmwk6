@@ -287,7 +287,7 @@ static int validate_dir_name(char *dir_name)
 	struct task_struct *p;
 
 	i = 0;
-	while(*dir_name != '\0') {
+	while (*dir_name != '\0') {
 		if (*dir_name == '.') {
 			dir_name++;
 			break;
@@ -299,7 +299,7 @@ static int validate_dir_name(char *dir_name)
 	process_id[i] = '\0';
 
 	i = 0;
-	while(*dir_name != '\0') {
+	while (*dir_name != '\0') {
 		process_name[i] = *dir_name;
 		i++;
 		dir_name++;
@@ -324,7 +324,8 @@ static int validate_dir_name(char *dir_name)
 		return -ESRCH;
 }
 
-struct dentry *ppagefs_simple_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
+struct dentry *ppagefs_simple_lookup(struct inode *dir,
+				struct dentry *dentry, unsigned int flags)
 {
 	char total_file_name[] = "total";
 	char zero_file_name[] = "zero";
@@ -341,7 +342,8 @@ struct dentry *ppagefs_simple_lookup(struct inode *dir, struct dentry *dentry, u
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	inode = ppagefs_make_inode(dentry->d_sb, S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
+	inode = ppagefs_make_inode(dentry->d_sb,
+					S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
 
 	if (!inode) {
 		dput(dentry);
