@@ -37,7 +37,7 @@ struct ppagefs_fsdata {
 	struct completion active_users_drained;
 };
 
-static struct inode *ppage_make_inode(struct super_block *sb, int mode)
+static struct inode *ppagefs_make_inode(struct super_block *sb, int mode)
 {
 	struct inode *inode;
 
@@ -59,12 +59,13 @@ static long calculate_pages(struct task_struct *task, int toggle)
 {
 	struct mm_struct *task_mm;
 	struct vm_area_struct *vma;
-	unsigned long begin, end, curr;
+	unsigned long begin, end;
 	long count;
 	int ret;
 
-	count = 0;
 	LIST_HEAD(pfn_list);
+
+	count = 0;
 
 	task_mm = get_task_mm(task);
 
@@ -154,7 +155,7 @@ const struct file_operations ppagefs_file_operations = {
 	.llseek		= noop_llseek,
 };
 
-struct dentry *ppage_create_file(struct super_block *sb,
+struct dentry *ppagefs_create_file(struct super_block *sb,
 		struct dentry *dir, const char *name)
 {
 	struct dentry *dentry;
@@ -168,7 +169,7 @@ struct dentry *ppage_create_file(struct super_block *sb,
 	if (!dentry)
 		return NULL;
 
-	inode = ppage_make_inode(sb, S_IFREG | PPAGEFS_DEFAULT_FILE_MODE);
+	inode = ppagefs_make_inode(sb, S_IFREG | PPAGEFS_DEFAULT_FILE_MODE);
 	if (!inode) {
 		dput(dentry);
 		return NULL;
@@ -187,7 +188,12 @@ static void __ppagefs_file_removed(struct dentry *dentry)
 {
 	struct ppagefs_fsdata *fsd;
 
-	//memory barrier
+	/*
+	 * Paired with the closing smp_mb() implied by a successful
+	 * cmpxchg() in debugfs_file_get(): either
+	 * debugfs_file_get() must see a dead dentry or we must see a
+	 * debugfs_fsdata instance at ->d_fsdata here (or both).
+	 */
 	smp_mb();
 
 	fsd = READ_ONCE(dentry->d_fsdata);
@@ -271,7 +277,7 @@ void ppagefs_remove_recursive(struct dentry *dentry)
 }
 
 
-struct dentry *ppage_create_dir(struct super_block *sb,
+struct dentry *ppagefs_create_dir(struct super_block *sb,
 		struct dentry *dir, const char *name)
 {
 	struct dentry *dentry;
@@ -288,7 +294,7 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 	if (!dentry)
 		return NULL;
 
-	inode = ppage_make_inode(sb, S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
+	inode = ppagefs_make_inode(sb, S_IFDIR | PPAGEFS_DEFAULT_DIR_MODE);
 	if (!inode) {
 		dput(dentry);
 		return NULL;
@@ -299,11 +305,11 @@ struct dentry *ppage_create_dir(struct super_block *sb,
 
 	d_add(dentry, inode);
 
-	if (ppage_create_file(sb, dentry, total_file_name) < 0)
-		return -ENOMEM;
+	if (ppagefs_create_file(sb, dentry, total_file_name) < 0)
+		return ERR_PTR(-ENOMEM);
 
-	if (ppage_create_file(sb, dentry, zero_file_name) < 0)
-		return -ENOMEM;
+	if (ppagefs_create_file(sb, dentry, zero_file_name) < 0)
+		return ERR_PTR(-ENOMEM);
 
 	return dentry;
 
@@ -318,11 +324,11 @@ void parse(char *name)
 	}
 }
 
-static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
+static int ppagefs_create_subdir(struct super_block *sb, struct dentry *dir)
 {
 
 	struct task_struct *p;
-	long total_pages, zero_pages, pid;
+	long pid;
 	char s_pid[6], task_name[16], subdir_name[30] = "";
 
 	read_lock(&tasklist_lock);
@@ -339,7 +345,7 @@ static int ppage_create_subdir(struct super_block *sb, struct dentry *dir)
 		strcat(subdir_name, ".");
 		strcat(subdir_name, task_name);
 
-		ppage_create_dir(sb, dir, subdir_name);
+		ppagefs_create_dir(sb, dir, subdir_name);
 	}
 	read_unlock(&tasklist_lock);
 	return 0;
@@ -407,7 +413,7 @@ static int ppagefs_root_dir_open(struct inode *inode, struct file *file)
 		list_for_each_entry(child, &dentry->d_subdirs, d_child)
 			ppagefs_remove_recursive(child);
 	}
-	if (ppage_create_subdir(sb, sb->s_root) < 0)
+	if (ppagefs_create_subdir(sb, sb->s_root) < 0)
 		return -ENOMEM;
 
 	return dcache_dir_open(inode, file);
@@ -424,11 +430,11 @@ const struct file_operations ppagefs_root_dir_operations = {
 
 static int ppagefs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
-	static const struct tree_descr ppage_files[] = { {""} };
+	static const struct tree_descr ppagefs_files[] = { {""} };
 	struct inode *inode;
 	int err;
 
-	err = simple_fill_super(sb, PPAGEFS_MAGIC, ppage_files);
+	err = simple_fill_super(sb, PPAGEFS_MAGIC, ppagefs_files);
 	if (err)
 		goto fail;
 	inode = d_inode(sb->s_root);
@@ -471,7 +477,7 @@ static void ppagefs_kill_sb(struct super_block *sb)
 	kill_litter_super(sb);
 }
 
-static struct file_system_type ppage_fs_type = {
+static struct file_system_type ppagefs_type = {
 	.owner =		THIS_MODULE,
 	.name =			"ppagefs",
 	.init_fs_context =	ppagefs_init_fs_context,
@@ -482,7 +488,7 @@ static struct file_system_type ppage_fs_type = {
 
 static int __init ppagefs_init(void)
 {
-	return register_filesystem(&ppage_fs_type);
+	return register_filesystem(&ppagefs_type);
 }
 
 /* To initialize PpageFS at kernel boot time */
