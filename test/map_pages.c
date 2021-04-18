@@ -22,12 +22,18 @@ int main(void)
 		pid = getpid();
 		
 		sprintf(inspect_pages,"./inspect_pages %d",pid);		
-		addr = malloc(size);
 		
+		printf("\n\nCASE 1 - Allocating heap memory\n");
+		printf("================================================\n");
+		addr = malloc(size);
 		if (!addr)
 			return -ENOMEM;
-		
+
+		system(inspect_pages);
+
 		/* Allocating zero pages */
+		printf("\n\nCASE 2 - Mapping Zero Pages \n");
+                printf("================================================\n");
 		memset(addr, 0, size);
 		system(inspect_pages);
 		
@@ -35,6 +41,8 @@ int main(void)
 		getchar();
 		fflush(stdin);
 		
+		printf("\n\nCASE 3 - Transforming 4 pages to Non-Zero Pages\n");
+                printf("================================================\n");
 		memset(addr, 'a', PAGE_SIZE * 4);
 		system(inspect_pages);		
 		
@@ -42,6 +50,8 @@ int main(void)
 		getchar();
 		fflush(stdin);
 		
+		printf("\n\nCASE 4 - Mapping all pages back to Zero Pages\n");
+                printf("================================================\n");
 		memset(addr, 0, size);
 		system(inspect_pages);		
 				
