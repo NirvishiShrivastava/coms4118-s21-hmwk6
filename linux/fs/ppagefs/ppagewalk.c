@@ -46,7 +46,7 @@ static int expose_page_range(struct mm_struct *target_mm,
 			} else {
 				virt_addr = pfn_to_virt(pfn);
 				zero_buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
-				if(!zero_buf)
+				if (!zero_buf)
 					return -ENOMEM;
 
 				if (memcmp(virt_addr, zero_buf, PAGE_SIZE) == 0
