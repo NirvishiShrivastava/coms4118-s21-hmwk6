@@ -53,3 +53,39 @@ Reading Files in Directory: /mnt/1759.map_pages
 # of Total Pages: 297
 # of Zero Pages: 10
 
+----------------------------------------------------------------------------------------------------
+
+Test for Total Page Count:
+
+We created another program where we malloced 10 pages and set them to zero. Looking at the output from proc fs smaps_rollup
+file, we were able to see that our total pages count was indeed equal to the RSS/4 value that comes from that file.
+
+$./test
+PID matched with subdirectory : 2002.test
+Reading Files in Directory: /mnt/2002.test
+# of Total Pages: 328
+# of Zero Pages: 10
+
+
+$ cat /proc/2002/smaps_rollup 
+55af68b94000-7ffff3baf000 ---p 00000000 00:00 0                          [rollup]
+Rss:                1312 kB
+Pss:                 108 kB
+Pss_Anon:             98 kB
+Pss_File:             10 kB
+Pss_Shmem:             0 kB
+Shared_Clean:       1192 kB
+Shared_Dirty:         44 kB
+Private_Clean:         0 kB
+Private_Dirty:        76 kB
+Referenced:         1300 kB
+Anonymous:           120 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:        0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
