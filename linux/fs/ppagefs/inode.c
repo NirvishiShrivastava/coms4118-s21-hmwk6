@@ -55,6 +55,14 @@ static struct inode *ppagefs_make_inode(struct super_block *sb, int mode)
 	return inode;
 };
 
+static void free_list(struct list_head *head)
+{
+	struct page_iter_list *temp;
+
+	list_for_each_entry(temp, head, page_list)
+		kfree(temp);
+}
+
 static long calculate_pages(struct task_struct *task, int toggle)
 {
 	struct mm_struct *task_mm;
@@ -77,9 +85,12 @@ static long calculate_pages(struct task_struct *task, int toggle)
 		end = vma->vm_end;
 		ret = expose_vm_region(task_mm, begin, end, toggle,
 				&count, &pfn_list);
-		if (ret < 0)
+		if (ret < 0) {
+			free_list(&pfn_list);
 			return ret;
+		}
 	}
+	free_list(&pfn_list);
 	return count;
 }
 

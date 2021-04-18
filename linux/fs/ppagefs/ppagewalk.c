@@ -3,6 +3,7 @@
 #include <linux/slab.h>
 #include <asm/pgtable_64_types.h>
 #include <asm/page.h>
+#include <linux/mm.h>
 
 #define pfn_to_virt(pfn)	__va((pfn) << PAGE_SHIFT)
 #define PGD_SIZE	(PTRS_PER_PGD * sizeof(pgd_t))
@@ -26,7 +27,6 @@ static int expose_page_range(struct mm_struct *target_mm,
 {
 	int ret = 0;
 	pte_t *pte;
-	struct page *page;
 	unsigned long pfn;
 	struct page_iter_list *node;
 	unsigned long *virt_addr;
@@ -46,9 +46,14 @@ static int expose_page_range(struct mm_struct *target_mm,
 			} else {
 				virt_addr = pfn_to_virt(pfn);
 				zero_buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+				if(!zero_buf)
+					return -ENOMEM;
+
 				if (memcmp(virt_addr, zero_buf, PAGE_SIZE) == 0
 					|| pfn_to_page(pfn) == ZERO_PAGE(0))
 					*count += 1;
+
+				kfree(zero_buf);
 			}
 			node = kmalloc(sizeof(struct page_iter_list),
 					GFP_KERNEL);
