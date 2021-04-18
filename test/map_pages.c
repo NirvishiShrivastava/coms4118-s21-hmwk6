@@ -23,16 +23,16 @@ int main(void)
 		
 		sprintf(inspect_pages,"./inspect_pages %d",pid);		
 		
-		printf("\n\nCASE 1 - Allocating heap memory\n");
+		printf("\n\nCASE 1 - Allocating heap memory worth 20 pages\n");
 		printf("================================================\n");
-		addr = malloc(size);
+		addr = malloc(2 * size);
 		if (!addr)
 			return -ENOMEM;
 
 		system(inspect_pages);
 
 		/* Allocating zero pages */
-		printf("\n\nCASE 2 - Mapping Zero Pages \n");
+		printf("\n\nCASE 2 - Mapping 10 Zero Pages to value 0 \n");
                 printf("================================================\n");
 		memset(addr, 0, size);
 		system(inspect_pages);
@@ -46,7 +46,7 @@ int main(void)
 		memset(addr, 'a', PAGE_SIZE * 4);
 		system(inspect_pages);		
 		
-		printf("\nPress enter to scrub pages back to zero pages:");
+		printf("\nPress enter to scrub those 4 pages back to zero pages:");
 		getchar();
 		fflush(stdin);
 		
