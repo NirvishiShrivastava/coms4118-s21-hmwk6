@@ -1,9 +1,21 @@
+Following is the format of our inspect_pages program for process systemd with pid 1
+
 $ ./inspect_pages 1
 PID matched with subdirectory : 1.systemd
 Reading Files in Directory: /mnt/1.systemd
 # of Total Pages: 2298
 # of Zero Pages: 28
 
+--------------------------------------------------------------------------------------------------------------
+We create a process in map_pages and malloc 20 PAGE_SIZE worth of space.
+
+Then we memset 10 pages from them to 0 and calculate the pages count using our inspect_pages test program.
+We could see that number of zero pages count became 10.
+
+After that, out of those 10 pages, we assign some value to 4 pages and re-calculate the pages count.
+Post this operation, the zero pages went back to 6.
+
+Lastly, we scrub those 4 pages back to 0 value and see the zero pages count jump back to 10.
 
 $ ./map_pages
 CASE 1 - Allocating heap memory worth 20 pages
