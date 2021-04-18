@@ -15,7 +15,7 @@ void do_inspect_pages(int pid)
 	DIR *d;
 	char ch, pid_str[50], d_path[260], *token_pid, subdir_name[100] = "/mnt/";
 	struct dirent *dir;
-	
+
 	sprintf(pid_str,"%d",pid);
 	
 	/* extract sub directory name from pid */
@@ -29,7 +29,7 @@ void do_inspect_pages(int pid)
 				
 				if(strcmp(token_pid,pid_str) == 0) {
 					// Form subdir path
-					printf("\nPID matched with subdirectory : %s\n",d_path);
+					printf("PID matched with subdirectory : %s\n",d_path);
 					strcat(subdir_name,d_path);
 					break;
 				}
@@ -40,18 +40,19 @@ void do_inspect_pages(int pid)
 
 	if(chdir(subdir_name)== -1)
 		perror("Error changing directory");
-
+	/*
 	system("/bin/ls > /dev/null");
-	
+	*/
 	/* Read total */
 	fp = fopen("total", "r");
-	printf("File opening - %s\n",subdir_name);
+	printf("Reading Files in Directory: %s\n",subdir_name);
 	
 	if (fp == NULL) {
 		perror("Error while opening the file");
 		exit(EXIT_FAILURE);
 	}
 
+	printf("# of Total Pages: ");
 	while((ch = fgetc(fp)) != EOF)
 		printf("%c", ch);
 	
@@ -65,6 +66,7 @@ void do_inspect_pages(int pid)
 		exit(EXIT_FAILURE);
 	}
 
+	printf("# of Zero Pages: ");
 	while((ch = fgetc(fp)) != EOF)
 		printf("%c", ch);
     
